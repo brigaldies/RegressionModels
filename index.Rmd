@@ -1,0 +1,490 @@
+---
+title: An Analysis of the Impact of the Transmission Type on Miles-per-Gallons (MPG)
+  Using the R mtcars Data
+author: "Bertrand Rigaldies, February 26, 2016"
+geometry: margin=.5in
+output: html_document
+fontsize: 9pt
+---
+```{r global_options, echo=FALSE, warning=FALSE, message=FALSE, error=TRUE}
+# Load the knitr librabry, and set global options silently.
+require(knitr)
+#opts_chunk$set(warning=FALSE, message=FALSE, error=TRUE, dev = 'pdf')
+opts_chunk$set(warning=FALSE, message=FALSE, error=TRUE)
+```
+```{r echo=FALSE, results="hide"}
+# fig_num is used to number figures in the report.
+fig_num <- 1
+```
+```{r libraries, echo=FALSE, results="hide"}
+require(knitr) # To process this R markdown file
+require(plyr) # Data manipulation
+require(dplyr) # More data manipulation
+require(xtable) # Nice table presentation
+require(ggplot2) # Plotting
+require(datasets)
+data(mtcars)
+```
+
+# Executive Summary
+
+The paper analyzes the impact on cars' miles-per-gallon (MPG) of the transmission type, automatic vs. manual, using the R `mtcars` data. Using R's linear regression and statistical inference tools, the paper demonstrates that the `mtcars` data does *not* show any statistically significant impact of the transmission type on cars' MPG. The paper also identifies the most significant predictors of the car's MPG, namely the cars' weight and number of cylinders.
+
+# Methodology
+
+1. Some data exploration and data plotting show that the manual transmission type variable is not properly randomized in the `mtcars` data.
+1. The examination of various linear regression models shows that the cars' weight and number of cylinders are the two most significant MPG predictors.
+1. The addition of the transmission type variable to the best linear regression model identified in the previous step does not add any significance. 
+
+# Data Exploration
+
+The mtcars data is part of the R `datasets` library. The mtcars help (type `?mtcars` at the R prompt) provides the following description: *"The data was extracted from the 1974 Motor Trend US magazine, and comprises fuel consumption and 10 aspects of automobile design and performance for 32 automobiles (1973–74 models)."* The `mtcars` data is a data frame that contains `r nrow(mtcars)` observations (Distinct cars) across `r length(mtcars)` variables. The `head(mtcars)` R command below shows the first 5 records in `mtcars` (See the R code in Appendix A):
+
+```{r data_show, echo=FALSE, results='asis'}
+print(xtable(mtcars[1:5, ], auto=TRUE, caption='R mtcars data set (First 5 records)'), type="latex", comment=F)
+```
+
+```{r data_manip, echo=FALSE, results="hide"}
+cars <- mtcars %>% mutate(transmission = as.factor(am)) 
+cars$transmission <- revalue(cars$transmission, c("0" = "Automatic", "1"="Manual"))
+cars_auto <- filter(cars, am == 0)
+cars_manual <- filter(cars, am == 1)
+cars_small <- filter(cars, cyl <= 4)
+cars_small_auto <- filter(cars_small, am == 0)
+cars_small_manual <- filter(cars_small, am == 1)
+cars_big <- filter(cars, cyl > 4)
+cars_big_auto <- filter(cars_big, am == 0)
+cars_big_manual <- filter(cars_big, am == 1)
+```
+
+The following observations are made based on Figures `r fig_num`, `r fig_num + 1`, and `r fig_num + 2` on the next page (See the R code in Appendix B):
+
+* Figure `r fig_num` shows that the MPG averages for each transmission type (horizontal lines) are noticeably different, with the MPG average of `r round(mean(cars_manual$mpg), 2)` for manual transmission (blue line) being noticeably higher than the MPG average of `r round(mean(cars_auto$mpg), 2)` for automatic transmission (Red line).
+
+* However, Figure `r fig_num + 1` shows that the MPG averages for automatic and manual are noticeably different for 4-cylinder cars, while not so for 6-cylinder cars, and almost not at all different for 8-cylinder cars.
+
+* Furthermore, both Figures `r fig_num + 1` and `r fig_num + 2` show that a high percentage of small cars (Number of cylinders less than 4) are manual (`r sprintf("%2.0f%%", 100 * nrow(cars_small_manual)/nrow(cars_small))`), while a high percentage of large cars (Number of cylinders larger than 4) are automatic (`r sprintf("%2.0f%%", 100 * nrow(cars_big_auto)/nrow(cars_big))`), hence pointing to an issue in the `mtcars` data where the value of the transmission `am` variable is not very well randomized across the vehicles.
+
+* Finally, the linear regression (black) line on Figure `r fig_num + 2` strongly suggests that cars' weigth is a significant predictor of MPG.
+
+```{r data_plot_1, echo = FALSE, fig.width=9, fig.height = 3.8, fig.align='center'}
+# fit1 <- lm(mpg ~ transmission, data = cars)
+annotations <- data.frame(
+    x = c("Automatic", "Manual"), 
+    y = c(mean(cars_auto$mpg), mean(cars_manual$mpg)), 
+    label = c("Mean MPG for Automatic", "Mean MPG for Manual"))
+g1 <- ggplot(data = cars) + 
+    aes(x = transmission, y = mpg, color = transmission) + # Use fill = transmission for violin
+    geom_point(size = 2) + 
+    # geom_violin(colour = "black", size = 1) +
+    # geom_smooth(method = "lm", colour = "black") +
+    # geom_abline(intercept = summary(fit1)$coef[1,1], slope = summary(fit1)$coef[1,2]) +
+    geom_hline(yintercept = mean(cars_auto$mpg), colour="red") +
+    geom_hline(yintercept = mean(cars_manual$mpg), colour="blue") +
+    labs(x = 'Transmission Type', 
+               y = 'Miles per Gallon (MPG)',
+               title = paste('Fig.', fig_num, ': MPG vs. Transmission Type'))
+    # + geom_text(data = annotations, aes(x = x, y = y, label = label), vjust = -1, size = 4)
+g1
+fig_num <- fig_num + 1
+```
+
+```{r data_plot_2, echo = FALSE, fig.width=9, fig.height = 3.8, fig.align='center'}
+auto.means <- data.frame(z = c(
+    mean(filter(cars, transmission=="Automatic" & cyl==4)$mpg), 
+    mean(filter(cars, transmission=="Automatic" & cyl==6)$mpg), 
+    mean(filter(cars, transmission=="Automatic" & cyl==8)$mpg)),
+    cyl = c(4, 6, 8))
+manual.means <- data.frame(z = c(
+    mean(filter(cars, transmission=="Manual" & cyl==4)$mpg), 
+    mean(filter(cars, transmission=="Manual" & cyl==6)$mpg), 
+    mean(filter(cars, transmission=="Manual" & cyl==8)$mpg)),
+    cyl = c(4, 6, 8))
+g2 <- ggplot(data = cars) + 
+    aes(x = transmission, y = mpg, color = transmission) +             
+    geom_point(size = 2) +          
+    geom_hline(data = auto.means, aes(yintercept=z), colour="red") +
+    geom_hline(data = manual.means, aes(yintercept=z), colour="blue") +    
+    facet_grid(~ cyl) +
+    labs(x = 'Transmission Type', 
+               y = 'Miles per Gallon (MPG)',
+               title = paste('Fig.', fig_num, ': MPG vs. Transmission Type (By Number of Cylinders)'))
+g2
+fig_num <- fig_num + 1
+```
+
+```{r data_plot_3, echo = FALSE, fig.width=9, fig.height = 3.8, fig.align='center'}
+g3 <- ggplot(data = cars) +
+    aes(x = wt, y = mpg, color = transmission) +
+    geom_point(size = 2) +
+    geom_smooth(method = "lm", colour = "black") +
+    labs(x = 'Weight (lb/1000)', 
+               y = 'Miles per Gallon (MPG)',
+               title = paste('Fig.', fig_num, ': MPG vs. Car Weight'))
+g3
+fig_num <- fig_num + 1
+```
+
+# Hypothesis
+
+Intuitively, as well as based on everyday driver's experience, cars' MPG is greatly affected by both the car's weight and engine's displacement (or the number of cylinders; two highly correlated variables: `r sprintf("%2.1f%%", round(100 * cor(cars$cyl, cars$disp), 2))`). Not so intuitively, but known by most car enthusiasts, for a given car weight and engine displacement, a manual transmission yields better MPG than that of a manual transmission. However, our analysis will show that such MPG improvement is not statistically significant. Hence, our analysis shows that we **fail to reject** the following $H_{0}$ hypothesis:
+
+$H_{0}$: The transmission type (manual vs. automatic) has no statistically significant impact on MPG.
+
+# Analysis
+
+## Sorted Correlations
+
+The table below (See the R code in Appendix C) shows the correlations of each possible predictor variable to the `mpg` outcome variable, ordered by descending correlation value (Note: The correlations are shown in their absolute values). The table shows that the variables `wt` (Weight), `cyl` (Number of cylinders), `disp` (Total cylinders' volume), and `hp` (Horse power) are strong predictors of MPG, which is intuitively true to any car enthusiast. Note that the `am` variable is further down the list in 7th position.
+
+```{r correlations, echo=FALSE, results='asis'}
+mpg.cors.df <- as.data.frame((sapply(names(mtcars)[-1], function(variable) { cor(mtcars$mpg, mtcars[variable])})))
+names(mpg.cors.df) <- 'correlation'
+mpg.cors.df$abs_correlation <- abs(mpg.cors.df$correlation)
+mpg.cors.df <- add_rownames(mpg.cors.df, "VALUE")
+names(mpg.cors.df)[1] <- 'predictor'
+mpg.cors.df <- arrange(mpg.cors.df, desc(abs_correlation))
+print(xtable(mpg.cors.df, auto=TRUE, caption='MPG-to-Predictor Correlation (Descending absolute value)'), type="latex", comment=F)
+```
+
+## Sorted Linear Regression Models R.Squared
+
+As expected, the table of sorted R.Squared values below (See the R code in Appendice C) reinforces the observation made in the previous section based on the sorted absolute correlations: The variables `wt` (Weight), `cyl` (Number of cylinders), `disp` (Total cylinders' volume), and `hp` (Horse power) have the largest R.Squared values, which are measures of how strongly a variable explains the variability of the MPG around its mean.
+
+```{r r.squared, echo=FALSE, results="asis"}
+predictors <- names(mtcars)[2:length(names(mtcars))]
+models <- list(
+    lm(mpg ~ cyl, data = mtcars),
+    lm(mpg ~ disp, data = mtcars),
+    lm(mpg ~ hp, data = mtcars),
+    lm(mpg ~ drat, data = mtcars),
+    lm(mpg ~ wt, data = mtcars),
+    lm(mpg ~ qsec, data = mtcars),
+    lm(mpg ~ vs, data = mtcars),
+    lm(mpg ~ am, data = mtcars),
+    lm(mpg ~ gear, data = mtcars),
+    lm(mpg ~ gear, data = mtcars))
+models.df <- data.frame(
+    Predictor = predictors,
+    # pvalue = sapply(models, function(model) { summary(model)$coef[2,4]}),
+    R.Squared = sapply(models, function(model) { summary(model)$r.squared})
+    )
+models.rs.sorted.desc <- arrange(models.df, desc(R.Squared))
+print(xtable(models.rs.sorted.desc, auto=TRUE, caption='Sorted (Descending) R.Squared for mpg vs. single predictor models'), type="latex", comment=F)
+```
+
+## Linear Regression Model Selection 
+
+This section examines various regression linear models (See the R code in Appendix D).
+
+First, the model with all variables included (i.e., `mpg ~ .`) is examined to illustrate the issue of overfitting.
+
+Then, based on the sorted R.Squared list established in the previous section, this section proceeds with the construction and comparison of **nested** regression linear models. The starting model (a.k.a., 'Model 1') is `mpg ~ wt` since `wt` has the highest R.Squared, then one additional variable at a time is added to the previous model, and the `anova` function is used to compare the newly constructed model with the previous model.
+
+### Model 0: MPG ~ All Predictors
+
+Model 0 fits `mpg` versus all other variables. As shown in the table below, the P-value across all predictors is greater than 0.05 (Our chosen Alpha probability of a Type I error), hence showing that model 0 **accepts** that the slopes for all predictors are 0! We propose that this phenomenon is a form of *overfitting*.
+
+```{r model_0, echo=FALSE, results='asis'}
+model0 <- lm(mpg ~ ., data = mtcars)
+model0_coef_df = as.data.frame(summary(model0)$coef) %>% mutate(Accept = ifelse(`Pr(>|t|)` < 0.05, "True", "False"))
+print(xtable(model0_coef_df, auto=TRUE, caption='Model 0: mpg vs All Variables'), type="latex", comment=F)
+```
+
+```{r linear_models, echo=FALSE, results='hide'}
+fit1 <- lm(mpg ~ wt, data = mtcars)
+fit2 <- lm(mpg ~ wt + cyl, data = mtcars)
+anova(fit1, fit2)
+
+fit3 <- lm(mpg ~ wt + cyl + disp, data = mtcars)
+anova(fit1, fit2, fit3)
+
+fit3 <- lm(mpg ~ wt + cyl + hp, data = mtcars)
+anova(fit1, fit2, fit3)
+
+fit3 <- lm(mpg ~ wt + cyl + drat, data = mtcars)
+anova(fit1, fit2, fit3)
+
+fit3 <- lm(mpg ~ wt + cyl + vs, data = mtcars)
+anova(fit1, fit2, fit3)
+
+fit3 <- lm(mpg ~ wt + cyl + am, data = mtcars)
+anova(fit1, fit2, fit3)
+
+fit3 <- lm(mpg ~ wt + cyl + gear, data = mtcars)
+anova(fit1, fit2, fit3)
+
+fit3 <- lm(mpg ~ wt + cyl + carb, data = mtcars)
+anova(fit1, fit2, fit3)
+
+fit3 <- lm(mpg ~ wt + cyl + qsec, data = mtcars)
+anova(fit1, fit2, fit3)
+
+```
+
+### Model 1: MPG ~ Weight (Centered)
+
+Model 1 fits the `mpg` outcome with the rescaled-to-ton (1 ton = 2,000 lbs) and centered `wt` predictor.
+
+```{r model_1, echo = FALSE, results="asis"}
+cars <- mutate(cars, wtt = wt * 0.5, wttc = wtt - mean(wtt))
+#cars <- add_rownames(cars, "VALUE")
+#names(cars)[1] <- "car"
+model1 <- lm(mpg ~ wttc, data = cars)
+model1_coef_df = as.data.frame(summary(model1)$coef) %>% mutate(Accept = ifelse(`Pr(>|t|)` < 0.05, "True", "False"))
+row.names(model1_coef_df) <- c("Intercept", "Weight")
+print(xtable(model1_coef_df, auto=TRUE, caption='Model 1 Coefficients For Weight (Centered)'), type="latex", comment=F)
+```
+
+The Model 1 coefficients displayed in the table above are interpreted as follows:
+
+* **Intercept**: At the average car weight of `r round(mean(cars$wtt), 2)` ton, the MPG is `r round(summary(model1)$coef[1,1], 2)`.
+
+* **Slope**: For each 1-ton (2,000 lb) car weight increase, the MPG decreases by `r abs(round(summary(model1)$coef[2,1], 2))`.
+
+* **P-value**: The weight predictor's slope is statistically significant (i.e., we reject $H_{0}$ that the weigth coefficient is zero) with a P-value of `r sprintf("%.11f", summary(model1)$coef[2,4])` (< 0.05 type I error).
+
+The Model 1 Normal Q-Q and Scale-Location diagnostic plots are shown below.
+
+```{r model_1_residual_plots, echo=FALSE}
+par(mfrow = c(1, 2))
+plot(model1, which = 2)
+plot(model1, which = 3)
+```
+
+Based on the above Model 1 diagnostic residuals plots, the following observations are made:
+
+* **Normal Q-Q**: The plot shows good "iid normality" (The plot meets the "thick crayon" test).
+* **Scale-Location**: The plot does not show any noticeable pattern, and the data points seem reasonably distributed above and below the red line.
+* **Outliers**: The Scale-Location plot points out three outliers in rows 17, 18, and 20.
+    + Row 17 (`r rownames(mtcars)[17]`) is characterized by a combination of a heavy weight (`r round(cars[17, 'wttc'], 2)` ton), a large engine displacement (`r cars[17, 'disp']` cu.in.), and hig hengine horse power (`r cars[17, 'hp']` hp).
+    + Rows 18 (`r rownames(mtcars)[18]`) and 20 (`r rownames(mtcars)[20]`) are two small cars with a particularly high MPG and a combination of light weight, small engine displacement, and low horse power. You can see the two outliers on Figure `r fig_num - 1` as the two blue dots on the top left.
+
+## Model 2: MPG ~ Weight (Centered) + Number of Cylinders
+
+Model 2 adds the number of cylinders `cyl` variable to Model 1.
+
+```{r model_2, echo=FALSE, results="asis"}
+model2 <- update(model1, mpg ~ wttc + factor(cyl))
+model2_coef_df = as.data.frame(summary(model2)$coef) %>% mutate(Accept = ifelse(`Pr(>|t|)` < 0.05, "True", "False"))
+row.names(model2_coef_df) <- c("Intercept", "Weight (4-cyl)", "Weight (6-cyl)", "Weight (8-cyl)")
+print(xtable(model2_coef_df, auto=TRUE, caption='Model 2 Coefficients for Weight (Centered) + Number of Cylinders Factor'), type="latex", comment=F)
+anova1_2 <- anova(model1, model2)
+```
+
+Based on the P-values in the Model 2 coefficientst table above, we fail to reject the hypothesis that the number of cylinder variable does NOT have any impact (Slope = 0). In other words, the number of cylinder should be added to our linear regression model. The `anova` calculation comparing Model 2 and Model 2 also supports adding the weight variable to the model with a P-value of `r anova1_2[2,'Pr(>F)']`.
+
+The Model 2 coefficients are interpreted as follows:
+
+* **Intercept**: At the average 4-cylinder car weight of `r round(mean(filter(cars, cyl==4)$wtt), 2)` ton, the MPG is `r round(summary(model2)$coef[1,1], 2)`.
+
+* **Slopes**:
+    + **4-cylinder**: With each 1-ton car weight increase, the MPG decreases by `r abs(round(summary(model2)$coef[2,1], 2))`, which is statistically significant with a P-value of `r sprintf("%.6f", summary(model2)$coef[2,4])`.
+    + **6-cylinder**: With each 1-ton car weight increase, the MPG decreases by `r abs(round(summary(model2)$coef[3,1], 2))`, which is statistically significant with a P-value of `r sprintf("%.6f", summary(model2)$coef[3,4])`.
+    + **8-cylinder**: With each 1-ton car weight increase, the MPG decreases by `r abs(round(summary(model2)$coef[4,1], 2))`, which is statistically significant with a P-value of `r sprintf("%.6f", summary(model2)$coef[4,4])`.
+    
+## Model 3: MPG ~ Weight (centered) + Number of Cylinders + Transmission Type
+
+The technique used to build Model 2 and compare it to Model 1 is also used to add each subsequent variable in `mtcars` to Model 1, and verify with the `anova` function that each subsequent variable past `cyl` is not statistically significant. Model 3 in this section shows the technique for the transmission type `am`, the variable of interest in this paper. The table below contains the regression coefficients for Model 3.
+
+```{r model_3, echo=FALSE, results="asis"}
+model3 <- update(model2, mpg ~ wttc + factor(cyl) + factor(transmission))
+model3_coef_df = as.data.frame(summary(model3)$coef) %>% mutate(Accept = ifelse(`Pr(>|t|)` < 0.05, "True", "False"))
+row.names(model3_coef_df) <- c("Intercept", "Weight (4-cyl)", "Weight (6-cyl)", "Weight (8-cyl)", "Manual")
+print(xtable(model3_coef_df, auto=TRUE, caption='Model 3 Coefficients for Weight (Centered) and Number of Cylinders and Transmission Type Factors'), type="latex", comment=F)
+```
+
+The P-value for the "Manual" transmission type is `r round(model3_coef_df[5,"Pr(>|t|)"], 2)`, hence we fail to reject the hypothesis that the slope of the transmission type is zero, and we declare **the transmission type variable as not statistically significant** in the `mtcars` data set.
+
+The `anova` function execution below to compare Model 3 to Model 2 also shows a P-value for the added variable greater than our chosen Alpha probability of type I error 0.05, and we infer that the transmission type should not be added to Model 2.
+
+```{r anova_2_vs_3, echo=FALSE}
+anova(model2, model3)
+```
+
+# Conclusion
+
+In the `mtcars` dataset, the MPG's systematic variability is explained primarily by the cars's weight (variable `wt`) and number of cylinders (variable `cyl`), and not by the transmission type (variable `am`).
+
+# Appendices: All The R Code Used in the Paper
+
+## Appendix A: Data Manipulation
+
+```{r r_code_data_show, , eval=FALSE}
+print(xtable(mtcars[1:5, ], 
+             auto=TRUE, 
+             caption='R mtcars data set (First 5 records)'), 
+      type="latex", comment=F)
+```
+
+```{r r_code_data_manip, eval=FALSE}
+cars <- mtcars %>% mutate(transmission = as.factor(am)) 
+cars$transmission <- revalue(cars$transmission, c("0" = "Automatic", "1"="Manual"))
+cars_auto <- filter(cars, am == 0)
+cars_manual <- filter(cars, am == 1)
+cars_small <- filter(cars, cyl <= 4)
+cars_small_auto <- filter(cars_small, am == 0)
+cars_small_manual <- filter(cars_small, am == 1)
+cars_big <- filter(cars, cyl > 4)
+cars_big_auto <- filter(cars_big, am == 0)
+cars_big_manual <- filter(cars_big, am == 1)
+```
+
+## Appendix B: Plots
+
+### Figure 1
+
+```{r r_code_data_plot_1, eval=FALSE}
+annotations <- data.frame(
+    x = c("Automatic", "Manual"), 
+    y = c(mean(cars_auto$mpg), mean(cars_manual$mpg)), 
+    label = c("Mean MPG for Automatic", "Mean MPG for Manual"))
+g1 <- ggplot(data = cars) + 
+    aes(x = transmission, y = mpg, color = transmission) +
+    geom_point(size = 2) + 
+    geom_hline(yintercept = mean(cars_auto$mpg), colour="red") +
+    geom_hline(yintercept = mean(cars_manual$mpg), colour="blue") +
+    labs(x = 'Transmission Type', 
+               y = 'Miles per Gallon (MPG)',
+               title = paste('Fig.', fig_num, ': MPG vs. Transmission Type'))
+fig_num <- fig_num + 1
+```
+
+### Figure 2
+
+```{r r_code_data_plot_2, eval=FALSE}
+auto.means <- data.frame(z = c(
+    mean(filter(cars, transmission=="Automatic" & cyl==4)$mpg), 
+    mean(filter(cars, transmission=="Automatic" & cyl==6)$mpg), 
+    mean(filter(cars, transmission=="Automatic" & cyl==8)$mpg)),
+    cyl = c(4, 6, 8))
+manual.means <- data.frame(z = c(
+    mean(filter(cars, transmission=="Manual" & cyl==4)$mpg), 
+    mean(filter(cars, transmission=="Manual" & cyl==6)$mpg), 
+    mean(filter(cars, transmission=="Manual" & cyl==8)$mpg)),
+    cyl = c(4, 6, 8))
+g2 <- ggplot(data = cars) + 
+    aes(x = transmission, y = mpg, color = transmission) +             
+    geom_point(size = 2) +          
+    geom_hline(data = auto.means, aes(yintercept=z), colour="red") +
+    geom_hline(data = manual.means, aes(yintercept=z), colour="blue") +    
+    facet_grid(~ cyl) +
+    labs(x = 'Transmission Type', 
+               y = 'Miles per Gallon (MPG)',
+               title = paste('Fig.', fig_num, ': MPG vs. Transmission Type (By Number of Cylinders)'))
+fig_num <- fig_num + 1
+```
+
+### Figure 3
+
+```{r r_code_data_plot_3, eval=FALSE}
+g3 <- ggplot(data = cars) +
+    aes(x = wt, y = mpg, color = transmission) +
+    geom_point(size = 2) +
+    geom_smooth(method = "lm", colour = "black") +
+    labs(x = 'Weight (lb/1000)', 
+               y = 'Miles per Gallon (MPG)',
+               title = paste('Fig.', fig_num, ': MPG vs. Car Weight'))
+fig_num <- fig_num + 1
+```
+
+## Appendix C: Data Analysis
+
+### Sorted Correlations
+
+```{r r_code_correlations, eval=FALSE}
+mpg.cors.df <- as.data.frame((sapply(names(mtcars)[-1], function(variable) { cor(mtcars$mpg, mtcars[variable])})))
+names(mpg.cors.df) <- 'correlation'
+mpg.cors.df$abs_correlation <- abs(mpg.cors.df$correlation)
+mpg.cors.df <- add_rownames(mpg.cors.df, "VALUE")
+names(mpg.cors.df)[1] <- 'predictor'
+mpg.cors.df <- arrange(mpg.cors.df, desc(abs_correlation))
+print(xtable(mpg.cors.df, 
+             auto=TRUE, 
+             caption='MPG-to-Predictor Correlation (Descending absolute value)'), 
+      type="latex", comment=F)
+```
+
+### Sorted R.Squared
+
+```{r r_code_r.squared, eval=FALSE}
+predictors <- names(mtcars)[2:length(names(mtcars))]
+models <- list(
+    lm(mpg ~ cyl, data = mtcars),
+    lm(mpg ~ disp, data = mtcars),
+    lm(mpg ~ hp, data = mtcars),
+    lm(mpg ~ drat, data = mtcars),
+    lm(mpg ~ wt, data = mtcars),
+    lm(mpg ~ qsec, data = mtcars),
+    lm(mpg ~ vs, data = mtcars),
+    lm(mpg ~ am, data = mtcars),
+    lm(mpg ~ gear, data = mtcars),
+    lm(mpg ~ gear, data = mtcars))
+models.df <- data.frame(
+    Predictor = predictors,    
+    R.Squared = sapply(models, function(model) { summary(model)$r.squared})
+    )
+models.rs.sorted.desc <- arrange(models.df, desc(R.Squared))
+print(xtable(models.rs.sorted.desc, 
+             auto=TRUE, 
+             caption='Sorted (Descending) R.Squared for mpg vs. single predictor models'), 
+      type="latex", comment=F)
+```
+
+## Appendix D: Regression Models Analysis
+
+### Model 0
+
+```{r r_code_model_0, eval=FALSE}
+model0 <- lm(mpg ~ ., data = mtcars)
+model0_coef_df = as.data.frame(summary(model0)$coef) %>% 
+    mutate(Accept = ifelse(`Pr(>|t|)` < 0.05, "True", "False"))
+print(xtable(model0_coef_df, 
+             auto=TRUE, 
+             caption='Model 0: mpg vs All Variables'), 
+      type="latex", comment=F)
+```
+
+### Model 1
+
+```{r r_code_model_1, eval=FALSE}
+cars <- mutate(cars, wtt = wt * 0.5, wttc = wtt - mean(wtt))
+model1 <- lm(mpg ~ wttc, data = cars)
+model1_coef_df = as.data.frame(summary(model1)$coef) %>% 
+    mutate(Accept = ifelse(`Pr(>|t|)` < 0.05, "True", "False"))
+row.names(model1_coef_df) <- c("Intercept", "Weight")
+print(xtable(model1_coef_df, 
+             auto=TRUE, 
+             caption='Model 1 Coefficients For Weight (Centered)'), 
+      type="latex", comment=F)
+```
+
+### Model 2
+
+```{r r_code_model_2, eval=FALSE}
+model2 <- update(model1, mpg ~ wttc + factor(cyl))
+model2_coef_df = as.data.frame(summary(model2)$coef) %>% 
+    mutate(Accept = ifelse(`Pr(>|t|)` < 0.05, "True", "False"))
+row.names(model2_coef_df) <- c("Intercept", "Weight (4-cyl)", "Weight (6-cyl)", "Weight (8-cyl)")
+print(xtable(model2_coef_df, 
+             auto=TRUE, 
+             caption='Model 2 Coefficients for Weight (Centered) + Number of Cylinders Factor'), 
+      type="latex", comment=F)
+anova1_2 <- anova(model1, model2)
+```
+
+### Model 3
+
+```{r r_code_model_3, eval=FALSE}
+model3 <- update(model2, mpg ~ wttc + factor(cyl) + factor(transmission))
+model3_coef_df = as.data.frame(summary(model3)$coef) %>% 
+    mutate(Accept = ifelse(`Pr(>|t|)` < 0.05, "True", "False"))
+row.names(model3_coef_df) <- c("Intercept", "Weight (4-cyl)", "Weight (6-cyl)", "Weight (8-cyl)", "Manual")
+print(xtable(model3_coef_df, 
+             auto=TRUE, 
+             caption='Model 3 Coefficients for Weight (Centered) and Number of Cylinders and Transmission Type Factors'), 
+      type="latex", comment=F)
+anova2_3 <- anova(model2, model3)
+```
+
+*End of paper*
